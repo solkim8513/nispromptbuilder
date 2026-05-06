@@ -5,9 +5,9 @@ import type { Mode, Provider, PromptFields } from "@/lib/prompting";
 import { modeLabels } from "@/lib/prompting";
 
 const modes: Array<{ id: Mode; title: string; subtitle: string; icon: string }> = [
-  { id: "prd", title: "Write PRD", subtitle: "Company OpenAI", icon: "01" },
-  { id: "build", title: "Build Instruction", subtitle: "OpenAI / Claude / Gemini", icon: "02" },
-  { id: "review", title: "Code Review", subtitle: "Company OpenAI", icon: "03" }
+  { id: "prd", title: "Plan PRD", subtitle: "Company OpenAI", icon: "01" },
+  { id: "build", title: "Build Handoff", subtitle: "OpenAI / Claude / Gemini", icon: "02" },
+  { id: "review", title: "Review Result", subtitle: "Company OpenAI", icon: "03" }
 ];
 
 const providerLabels: Record<Provider, string> = {
@@ -22,7 +22,7 @@ const defaultsByMode: Record<Mode, PromptFields> = {
     goal: "",
     context: "",
     constraints: "",
-    output: "A complete PRD prompt with requirements, acceptance criteria, risks, and open questions.",
+    output: "A structured PRD document with requirements, acceptance criteria, risks, assumptions, and open questions.",
     extraNotes: ""
   },
   build: {
@@ -30,15 +30,15 @@ const defaultsByMode: Record<Mode, PromptFields> = {
     goal: "",
     context: "",
     constraints: "",
-    output: "A structured build prompt with scope, implementation order, validation steps, and final response format.",
+    output: "A build prompt for Claude/Codex that includes the PRD, implementation steps, validation steps, and a required Implementation Report return format.",
     extraNotes: ""
   },
   review: {
     role: "Senior code reviewer focused on correctness, UX, maintainability, and spec coverage",
-    goal: "",
-    context: "",
+    goal: "Review the actual implementation evidence against the original PRD and build instructions.",
+    context: "Use the PRD and build prompt as the standard. Use the implementation report as evidence of what was actually built.",
     constraints: "Do not rewrite from scratch. Prioritize actionable findings.",
-    output: "Must Fix, Should Fix, What Works, Action Plan, and Questions.",
+    output: "Must Fix, Should Fix, Spec Gaps, Test Gaps, What Works, Fix Prompt, and Questions.",
     extraNotes: ""
   }
 };
@@ -55,10 +55,16 @@ const examplesByMode: Record<Mode, string[]> = {
     "Avoid broad refactors unless required for the requested behavior."
   ],
   review: [
-    "Compare against the original requirements.",
-    "Focus on issues that could break users or confuse developers.",
-    "Give Claude Code or Codex a concrete action plan."
+    "Paste the Implementation Report returned by Claude/Codex.",
+    "Compare actual evidence against the original PRD.",
+    "Generate a concrete fix prompt for the builder."
   ]
+};
+
+type WorkflowArtifacts = {
+  prdDocument: string;
+  buildPrompt: string;
+  implementationReport: string;
 };
 
 type ProviderSettings = {
@@ -76,30 +82,57 @@ type GenerateResponse = {
 };
 
 const settingsKey = "nis-prompt-builder-provider-settings";
+const defaultProviderSettings: ProviderSettings = {
+  anthropicKey: "",
+  anthropicModel: "claude-sonnet-4-20250514",
+  geminiKey: "",
+  geminiModel: "gemini-2.0-flash"
+};
+
+function loadProviderSettings(): ProviderSettings {
+  if (typeof window === "undefined") {
+    return defaultProviderSettings;
+  }
+
+  const saved = window.localStorage.getItem(settingsKey);
+  if (!saved) {
+    return defaultProviderSettings;
+  }
+
+  try {
+    return { ...defaultProviderSettings, ...JSON.parse(saved) };
+  } catch {
+    return defaultProviderSettings;
+  }
+}
 
 export default function Home() {
   const [mode, setMode] = useState<Mode>("prd");
   const [provider, setProvider] = useState<Provider>("company-openai");
   const [fields, setFields] = useState<PromptFields>(defaultsByMode.prd);
-  const [settings, setSettings] = useState<ProviderSettings>({
-    anthropicKey: "",
-    anthropicModel: "claude-sonnet-4-20250514",
-    geminiKey: "",
-    geminiModel: "gemini-2.0-flash"
+  const [settings, setSettings] = useState<ProviderSettings>(loadProviderSettings);
+  const [artifacts, setArtifacts] = useState<WorkflowArtifacts>({
+    prdDocument: "",
+    buildPrompt: "",
+    implementationReport: ""
+  });
+  const [outputs, setOutputs] = useState<Record<Mode, string>>({
+    prd: "",
+    build: "",
+    review: ""
+  });
+  const [generatedMetas, setGeneratedMetas] = useState<Record<Mode, string>>({
+    prd: "",
+    build: "",
+    review: ""
   });
   const [showProviderPanel, setShowProviderPanel] = useState(false);
   const [status, setStatus] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [copied, setCopied] = useState(false);
-  const [output, setOutput] = useState("");
-  const [generatedMeta, setGeneratedMeta] = useState("");
 
-  useEffect(() => {
-    const saved = window.localStorage.getItem(settingsKey);
-    if (saved) {
-      setSettings((current) => ({ ...current, ...JSON.parse(saved) }));
-    }
-  }, []);
+  const output = outputs[mode];
+  const generatedMeta = generatedMetas[mode];
 
   useEffect(() => {
     window.localStorage.setItem(settingsKey, JSON.stringify(settings));
@@ -116,8 +149,6 @@ export default function Home() {
     setMode(nextMode);
     setFields(defaultsByMode[nextMode]);
     setProvider("company-openai");
-    setOutput("");
-    setGeneratedMeta("");
     setStatus("");
     setCopied(false);
     setShowProviderPanel(false);
@@ -139,22 +170,57 @@ export default function Home() {
     return undefined;
   }
 
+  function buildFieldsForRequest(): PromptFields {
+    return {
+      ...fields,
+      prdDocument: mode === "build" || mode === "review" ? artifacts.prdDocument : undefined,
+      buildPrompt: mode === "review" ? artifacts.buildPrompt : undefined,
+      implementationReport: mode === "review" ? artifacts.implementationReport : undefined
+    };
+  }
+
+  function updateArtifact(key: keyof WorkflowArtifacts, value: string) {
+    setArtifacts((current) => ({ ...current, [key]: value }));
+  }
+
+  function advanceToBuild() {
+    setMode("build");
+    setFields(defaultsByMode.build);
+    setProvider("company-openai");
+    setStatus("");
+    setCopied(false);
+  }
+
+  function advanceToReview() {
+    setMode("review");
+    setFields(defaultsByMode.review);
+    setProvider("company-openai");
+    setStatus("");
+    setCopied(false);
+  }
+
   async function generatePrompt(event: FormEvent) {
     event.preventDefault();
+    if (mode === "review" && !artifacts.implementationReport.trim()) {
+      setStatus("Paste the builder's Implementation Report before generating a review prompt.");
+      return;
+    }
+
     setIsLoading(true);
     setStatus("");
     setCopied(false);
-    setOutput("");
-    setGeneratedMeta("");
+    setOutputs((current) => ({ ...current, [mode]: "" }));
+    setGeneratedMetas((current) => ({ ...current, [mode]: "" }));
 
     try {
+      const requestFields = buildFieldsForRequest();
       const res = await fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           mode,
           provider,
-          fields,
+          fields: requestFields,
           userApiKey: providerKeyForCurrentSelection(),
           model: modelForCurrentSelection()
         })
@@ -163,8 +229,18 @@ export default function Home() {
       if (!res.ok || data.error) {
         throw new Error(data.error || "Generation failed.");
       }
-      setOutput(data.text || "");
-      setGeneratedMeta(`Generated with ${data.providerLabel || providerLabels[provider]}${data.model ? ` (${data.model})` : ""}`);
+      const text = data.text || "";
+      setOutputs((current) => ({ ...current, [mode]: text }));
+      setGeneratedMetas((current) => ({
+        ...current,
+        [mode]: `Generated with ${data.providerLabel || providerLabels[provider]}${data.model ? ` (${data.model})` : ""}`
+      }));
+      if (mode === "prd") {
+        setArtifacts((current) => ({ ...current, prdDocument: text }));
+      }
+      if (mode === "build") {
+        setArtifacts((current) => ({ ...current, buildPrompt: text }));
+      }
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Generation failed.");
     } finally {
@@ -187,7 +263,7 @@ export default function Home() {
         <header className="app-header">
           <div>
             <p className="eyebrow">NIS Prompt Builder</p>
-            <h1>Turn rough notes into structured prompts your team can trust.</h1>
+            <h1>Coordinate planning, building, and review across multiple AI tools.</h1>
           </div>
           <div className="readiness">
             <span>Readiness</span>
@@ -281,6 +357,53 @@ export default function Home() {
               </div>
             ) : null}
 
+            {mode === "build" ? (
+              <div className="artifact-panel">
+                <div className="field-pair">
+                  <label htmlFor="prd-document">PRD from Screen 1</label>
+                  <textarea
+                    id="prd-document"
+                    value={artifacts.prdDocument}
+                    onChange={(event) => updateArtifact("prdDocument", event.target.value)}
+                    placeholder="Generate Screen 1 first, or paste a PRD here."
+                  />
+                </div>
+              </div>
+            ) : null}
+
+            {mode === "review" ? (
+              <div className="artifact-panel">
+                <div className="field-pair">
+                  <label htmlFor="review-prd-document">Original PRD</label>
+                  <textarea
+                    id="review-prd-document"
+                    value={artifacts.prdDocument}
+                    onChange={(event) => updateArtifact("prdDocument", event.target.value)}
+                    placeholder="Generate Screen 1 first, or paste the PRD here."
+                  />
+                </div>
+                <div className="field-pair">
+                  <label htmlFor="review-build-prompt">Build prompt sent to Claude/Codex</label>
+                  <textarea
+                    id="review-build-prompt"
+                    value={artifacts.buildPrompt}
+                    onChange={(event) => updateArtifact("buildPrompt", event.target.value)}
+                    placeholder="Generate Screen 2 first, or paste the build prompt here."
+                  />
+                </div>
+                <div className="field-pair">
+                  <label htmlFor="implementation-report">Implementation Report from builder</label>
+                  <textarea
+                    id="implementation-report"
+                    value={artifacts.implementationReport}
+                    onChange={(event) => updateArtifact("implementationReport", event.target.value)}
+                    placeholder="Paste Claude/Codex final report, changed files, test output, screenshots notes, or manual QA notes."
+                    required
+                  />
+                </div>
+              </div>
+            ) : null}
+
             <div className="field-pair">
               <label htmlFor="role">Role</label>
               <input id="role" value={fields.role} onChange={(event) => updateField("role", event.target.value)} required />
@@ -315,7 +438,7 @@ export default function Home() {
               />
             </div>
             <div className="field-pair">
-              <label htmlFor="output">What should the final answer include?</label>
+              <label htmlFor="output-format">What should the final answer include?</label>
               <textarea id="output-format" value={fields.output} onChange={(event) => updateField("output", event.target.value)} required />
             </div>
             <div className="field-pair">
@@ -356,9 +479,21 @@ export default function Home() {
 
             <div className="action-row">
               <button className="primary-button" type="submit" disabled={isLoading}>
-                {isLoading ? "Generating..." : "Generate prompt"}
+                {isLoading ? "Generating..." : mode === "prd" ? "Generate PRD" : mode === "build" ? "Generate build prompt" : "Generate review prompt"}
               </button>
             </div>
+
+            {mode === "prd" && output ? (
+              <button className="secondary-button followup-button" type="button" onClick={advanceToBuild}>
+                Use PRD for build
+              </button>
+            ) : null}
+
+            {mode === "build" && output ? (
+              <button className="secondary-button followup-button" type="button" onClick={advanceToReview}>
+                Use build prompt for review
+              </button>
+            ) : null}
           </section>
         </form>
       </section>

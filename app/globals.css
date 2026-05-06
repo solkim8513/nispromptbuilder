@@ -228,6 +228,16 @@ h2 {
   padding: 10px;
 }
 
+.artifact-panel {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 18px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+}
+
 .field-pair {
   display: grid;
   gap: 7px;
@@ -327,6 +337,11 @@ textarea:focus {
   padding: 9px 13px;
   color: var(--accent-strong);
   background: var(--panel);
+}
+
+.followup-button {
+  width: 100%;
+  margin-top: 10px;
 }
 
 @media (max-width: 900px) {

@@ -8,6 +8,9 @@ export type PromptFields = {
   constraints?: string;
   output: string;
   extraNotes?: string;
+  prdDocument?: string;
+  buildPrompt?: string;
+  implementationReport?: string;
 };
 
 export type GenerateRequest = {
@@ -62,7 +65,10 @@ export function validateGenerateRequest(body: unknown): GenerateRequest {
       context: fields.context!.trim(),
       constraints: fields.constraints?.trim(),
       output: fields.output!.trim(),
-      extraNotes: fields.extraNotes?.trim()
+      extraNotes: fields.extraNotes?.trim(),
+      prdDocument: fields.prdDocument?.trim(),
+      buildPrompt: fields.buildPrompt?.trim(),
+      implementationReport: fields.implementationReport?.trim()
     },
     userApiKey: candidate.userApiKey?.trim(),
     model: candidate.model?.trim()
@@ -75,6 +81,9 @@ export function buildUserContent(fields: PromptFields) {
     `Goal: ${fields.goal}`,
     `Context: ${fields.context}`,
     fields.constraints ? `Constraints: ${fields.constraints}` : null,
+    fields.prdDocument ? `Original PRD / Plan:\n${fields.prdDocument}` : null,
+    fields.buildPrompt ? `Build Prompt / Instructions:\n${fields.buildPrompt}` : null,
+    fields.implementationReport ? `Implementation Evidence:\n${fields.implementationReport}` : null,
     `Desired Output: ${fields.output}`,
     fields.extraNotes ? `Additional Notes: ${fields.extraNotes}` : null
   ]
@@ -85,10 +94,10 @@ export function buildUserContent(fields: PromptFields) {
 export function getSystemPrompt(mode: Mode) {
   const shared = `You are an expert prompt architect for internal software teams.
 
-The user will provide rough notes. Transform them into one high-quality prompt that another AI assistant can follow reliably.
+The user will provide rough notes and workflow artifacts. Transform them into the requested delivery artifact for a planning, building, and review workflow.
 
 Rules:
-- Output only the final prompt text.
+- Output only the final artifact text.
 - Do not wrap the answer in markdown fences.
 - Keep the prompt structured, practical, and directly usable.
 - Preserve explicit user constraints.
@@ -98,26 +107,28 @@ Rules:
   if (mode === "prd") {
     return `${shared}
 
-This mode creates a PRD / clarification prompt for Codex or ChatGPT.
-The final prompt should ask for: overview, users, goals, non-goals, core workflows, requirements, acceptance criteria, data model notes, edge cases, risks, and open questions.
-Make the prompt encourage thoughtful requirement discovery rather than premature implementation.`;
+This mode creates the actual PRD / planning document that later build and review stages will use as the source of truth.
+The final artifact should include: overview, users, goals, non-goals, core workflows, requirements, acceptance criteria, data model notes, edge cases, risks, assumptions, and open questions.
+Make the document concrete enough for a coding agent to build from, while clearly marking unknowns that need confirmation.`;
   }
 
   if (mode === "build") {
     return `${shared}
 
 This mode creates an implementation prompt for an agentic coding tool such as Codex or Claude Code.
-The final prompt should include: mission, current context, implementation scope, non-goals, files/areas to inspect, exact constraints, step-by-step working expectations, testing/verification steps, and final response format.
+The final prompt should include: mission, the original PRD, current implementation context, implementation scope, non-goals, files/areas to inspect, exact constraints, step-by-step working expectations, testing/verification steps, and final response format.
 It must work for both new builds and existing-code changes, across stacks such as Power Apps, React, SharePoint, Power Automate, LangChain, Node, Python, and SQL.
-When the user did not provide exact file paths or stack details, instruct the coding agent to inspect first and adapt to the existing project patterns.`;
+When the user did not provide exact file paths or stack details, instruct the coding agent to inspect first and adapt to the existing project patterns.
+The final response format must require an "Implementation Report" with these sections: Summary, Requirements Covered, Files Changed, Tests Run, Manual QA, Screenshots / URLs, Known Gaps, Risks.`;
   }
 
   return `${shared}
 
-This mode creates a red-team review prompt for Codex or another code reviewer.
-The final prompt should require findings first, ordered by severity, with concrete file/behavior references when available.
+This mode creates a review prompt that evaluates actual implementation evidence against the original PRD and build prompt.
+The final prompt must tell the reviewer not to only critique the prompt. It should compare Original PRD vs Build Prompt vs Implementation Evidence.
+The review should require findings first, ordered by severity, with concrete file/behavior references when available.
 Include review dimensions: spec coverage, correctness, security, privacy, edge cases, regression risk, maintainability, UX, and test gaps.
-Use sections: Must Fix, Should Fix, What Works, Action Plan, Questions.`;
+Use sections: Must Fix, Should Fix, Spec Gaps, Test Gaps, What Works, Fix Prompt, Questions.`;
 }
 
 export function recommendedProviderForMode(mode: Mode): Provider {
