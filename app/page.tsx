@@ -27,7 +27,7 @@ const defaultsByMode: Record<Mode, PromptFields> = {
   },
   build: {
     role: "Senior engineer who follows the existing project patterns",
-    goal: "",
+    goal: "Build the product described in the PRD.",
     context: "",
     constraints: "",
     output: "A build prompt for Claude/Codex that includes the PRD, implementation steps, validation steps, and a required Implementation Report return format.",
@@ -65,6 +65,30 @@ type WorkflowArtifacts = {
   prdDocument: string;
   buildPrompt: string;
   implementationReport: string;
+};
+
+const sectionTitles: Record<Mode, string> = {
+  prd: "Plan inputs",
+  build: "Build handoff",
+  review: "Review evidence"
+};
+
+const outputTitles: Record<Mode, string> = {
+  prd: "Structured PRD",
+  build: "Build prompt for Claude/Codex",
+  review: "Review findings and fix prompt"
+};
+
+const emptyOutputText: Record<Mode, string> = {
+  prd: "Describe the idea, then generate a structured PRD.",
+  build: "Confirm the PRD and repo notes, then generate the build handoff.",
+  review: "Paste the builder's report, then generate the review prompt."
+};
+
+const loadingText: Record<Mode, string> = {
+  prd: "Writing a structured PRD...",
+  build: "Preparing the build handoff...",
+  review: "Preparing the review prompt..."
 };
 
 type ProviderSettings = {
@@ -109,7 +133,7 @@ function loadProviderSettings(): ProviderSettings {
 export default function Home() {
   const [mode, setMode] = useState<Mode>("prd");
   const [provider, setProvider] = useState<Provider>("company-openai");
-  const [fields, setFields] = useState<PromptFields>(defaultsByMode.prd);
+  const [fieldsByMode, setFieldsByMode] = useState<Record<Mode, PromptFields>>(defaultsByMode);
   const [settings, setSettings] = useState<ProviderSettings>(loadProviderSettings);
   const [artifacts, setArtifacts] = useState<WorkflowArtifacts>({
     prdDocument: "",
@@ -133,21 +157,32 @@ export default function Home() {
 
   const output = outputs[mode];
   const generatedMeta = generatedMetas[mode];
+  const fields = fieldsByMode[mode];
 
   useEffect(() => {
     window.localStorage.setItem(settingsKey, JSON.stringify(settings));
   }, [settings]);
 
   const readiness = useMemo(() => {
-    const required = [fields.role, fields.goal, fields.context, fields.output].filter(Boolean).length;
-    if (required === 4 && fields.constraints) return "Strong";
-    if (required >= 3) return "Good";
+    if (mode === "build") {
+      if (artifacts.prdDocument && fields.context && fields.constraints) return "Strong";
+      if (artifacts.prdDocument && fields.context) return "Good";
+      return "Needs context";
+    }
+    if (mode === "review") {
+      if (artifacts.prdDocument && artifacts.buildPrompt && artifacts.implementationReport) return "Strong";
+      if (artifacts.prdDocument && artifacts.buildPrompt) return "Good";
+      return "Needs evidence";
+    }
+
+    const required = [fields.goal, fields.context].filter(Boolean).length;
+    if (required === 2 && fields.constraints) return "Strong";
+    if (required === 2) return "Good";
     return "Needs context";
-  }, [fields]);
+  }, [artifacts, fields, mode]);
 
   function switchMode(nextMode: Mode) {
     setMode(nextMode);
-    setFields(defaultsByMode[nextMode]);
     setProvider("company-openai");
     setStatus("");
     setCopied(false);
@@ -155,7 +190,13 @@ export default function Home() {
   }
 
   function updateField(key: keyof PromptFields, value: string) {
-    setFields((current) => ({ ...current, [key]: value }));
+    setFieldsByMode((current) => ({
+      ...current,
+      [mode]: {
+        ...current[mode],
+        [key]: value
+      }
+    }));
   }
 
   function providerKeyForCurrentSelection() {
@@ -185,7 +226,6 @@ export default function Home() {
 
   function advanceToBuild() {
     setMode("build");
-    setFields(defaultsByMode.build);
     setProvider("company-openai");
     setStatus("");
     setCopied(false);
@@ -193,7 +233,6 @@ export default function Home() {
 
   function advanceToReview() {
     setMode("review");
-    setFields(defaultsByMode.review);
     setProvider("company-openai");
     setStatus("");
     setCopied(false);
@@ -255,7 +294,248 @@ export default function Home() {
     window.setTimeout(() => setCopied(false), 1800);
   }
 
-  const buildProviderDisabled = mode !== "build";
+  function renderProviderControls() {
+    if (mode !== "build") {
+      return (
+        <div className="provider-strip fixed-provider">
+          <span>Model provider</span>
+          <strong>Company OpenAI</strong>
+        </div>
+      );
+    }
+
+    return (
+      <>
+        <div className="provider-strip">
+          <label htmlFor="provider">Builder model</label>
+          <select id="provider" value={provider} onChange={(event) => setProvider(event.target.value as Provider)}>
+            <option value="company-openai">Company OpenAI</option>
+            <option value="anthropic">Claude / Anthropic</option>
+            <option value="gemini">Gemini</option>
+          </select>
+        </div>
+
+        {showProviderPanel ? (
+          <div className="provider-panel">
+            <p>Claude and Gemini keys are saved only in this browser. Do not use this option on shared computers.</p>
+            <div className="field-pair">
+              <label htmlFor="anthropic-key">Claude API key</label>
+              <input
+                id="anthropic-key"
+                type="password"
+                value={settings.anthropicKey}
+                onChange={(event) => setSettings((current) => ({ ...current, anthropicKey: event.target.value }))}
+                placeholder="sk-ant-..."
+              />
+            </div>
+            <div className="field-pair">
+              <label htmlFor="anthropic-model">Claude model</label>
+              <input
+                id="anthropic-model"
+                value={settings.anthropicModel}
+                onChange={(event) => setSettings((current) => ({ ...current, anthropicModel: event.target.value }))}
+              />
+            </div>
+            <div className="field-pair">
+              <label htmlFor="gemini-key">Gemini API key</label>
+              <input
+                id="gemini-key"
+                type="password"
+                value={settings.geminiKey}
+                onChange={(event) => setSettings((current) => ({ ...current, geminiKey: event.target.value }))}
+                placeholder="AIza..."
+              />
+            </div>
+            <div className="field-pair">
+              <label htmlFor="gemini-model">Gemini model</label>
+              <input
+                id="gemini-model"
+                value={settings.geminiModel}
+                onChange={(event) => setSettings((current) => ({ ...current, geminiModel: event.target.value }))}
+              />
+            </div>
+          </div>
+        ) : null}
+      </>
+    );
+  }
+
+  function renderAdvancedFields() {
+    return (
+      <details className="advanced-panel">
+        <summary>Advanced settings</summary>
+        <div className="field-pair">
+          <label htmlFor={`${mode}-role`}>AI role</label>
+          <input id={`${mode}-role`} value={fields.role} onChange={(event) => updateField("role", event.target.value)} required />
+        </div>
+        <div className="field-pair">
+          <label htmlFor={`${mode}-output-format`}>Final answer should include</label>
+          <textarea
+            id={`${mode}-output-format`}
+            value={fields.output}
+            onChange={(event) => updateField("output", event.target.value)}
+            required
+          />
+        </div>
+      </details>
+    );
+  }
+
+  function renderPlanFields() {
+    return (
+      <>
+        <div className="screen-card plan-card">
+          <div className="field-pair">
+            <label htmlFor="original-idea">Original idea</label>
+            <textarea
+              id="original-idea"
+              value={fields.goal}
+              onChange={(event) => updateField("goal", event.target.value)}
+              placeholder="Tell the planner what you want to make. Plain words are perfect."
+              required
+            />
+          </div>
+          <div className="field-pair">
+            <label htmlFor="current-context">Current context</label>
+            <textarea
+              id="current-context"
+              value={fields.context}
+              onChange={(event) => updateField("context", event.target.value)}
+              placeholder="Mention existing app, users, data, screenshots, links, or current process."
+              required
+            />
+          </div>
+          <div className="field-pair">
+            <label htmlFor="plan-limits">Rules or limits</label>
+            <textarea
+              id="plan-limits"
+              value={fields.constraints || ""}
+              onChange={(event) => updateField("constraints", event.target.value)}
+              placeholder="Anything the plan must avoid, include, or protect."
+            />
+          </div>
+          <div className="field-pair">
+            <label htmlFor="plan-notes">Extra notes</label>
+            <textarea
+              id="plan-notes"
+              value={fields.extraNotes || ""}
+              onChange={(event) => updateField("extraNotes", event.target.value)}
+              placeholder="Paste rough notes, questions, or team preferences."
+            />
+          </div>
+        </div>
+        {renderAdvancedFields()}
+      </>
+    );
+  }
+
+  function renderBuildFields() {
+    return (
+      <>
+        {renderProviderControls()}
+        <div className="screen-card build-card">
+          <div className="field-pair">
+            <label htmlFor="prd-document">Editable PRD from Screen 1</label>
+            <textarea
+              id="prd-document"
+              className="large-textarea"
+              value={artifacts.prdDocument}
+              onChange={(event) => updateArtifact("prdDocument", event.target.value)}
+              placeholder="Generate Screen 1 first, or paste a PRD here."
+              required
+            />
+          </div>
+          <div className="field-pair">
+            <label htmlFor="repo-context">Repo or app context</label>
+            <textarea
+              id="repo-context"
+              value={fields.context}
+              onChange={(event) => updateField("context", event.target.value)}
+              placeholder="Tell the builder where this will be built: repo, stack, files, platform, data source, or tools."
+              required
+            />
+          </div>
+          <div className="field-pair">
+            <label htmlFor="build-constraints">Build guardrails</label>
+            <textarea
+              id="build-constraints"
+              value={fields.constraints || ""}
+              onChange={(event) => updateField("constraints", event.target.value)}
+              placeholder="What should Claude/Codex avoid changing? Add style, test, or rollout rules."
+            />
+          </div>
+          <div className="field-pair">
+            <label htmlFor="builder-notes">Builder notes</label>
+            <textarea
+              id="builder-notes"
+              value={fields.extraNotes || ""}
+              onChange={(event) => updateField("extraNotes", event.target.value)}
+              placeholder="Optional details to help the builder produce better work."
+            />
+          </div>
+        </div>
+        {renderAdvancedFields()}
+      </>
+    );
+  }
+
+  function renderReviewFields() {
+    return (
+      <>
+        {renderProviderControls()}
+        <div className="screen-card review-card">
+          <div className="field-pair">
+            <label htmlFor="review-prd-document">Editable original PRD</label>
+            <textarea
+              id="review-prd-document"
+              value={artifacts.prdDocument}
+              onChange={(event) => updateArtifact("prdDocument", event.target.value)}
+              placeholder="Generate Screen 1 first, or paste the PRD here."
+            />
+          </div>
+          <div className="field-pair">
+            <label htmlFor="review-build-prompt">Editable build prompt</label>
+            <textarea
+              id="review-build-prompt"
+              value={artifacts.buildPrompt}
+              onChange={(event) => updateArtifact("buildPrompt", event.target.value)}
+              placeholder="Generate Screen 2 first, or paste the build prompt here."
+            />
+          </div>
+          <div className="field-pair primary-evidence">
+            <label htmlFor="implementation-report">Builder&apos;s Implementation Report</label>
+            <textarea
+              id="implementation-report"
+              className="large-textarea"
+              value={artifacts.implementationReport}
+              onChange={(event) => updateArtifact("implementationReport", event.target.value)}
+              placeholder="Paste Claude/Codex final report, changed files, test output, screenshots notes, or manual QA notes."
+              required
+            />
+          </div>
+          <div className="field-pair">
+            <label htmlFor="review-focus">Review focus</label>
+            <textarea
+              id="review-focus"
+              value={fields.extraNotes || ""}
+              onChange={(event) => updateField("extraNotes", event.target.value)}
+              placeholder="Optional: tell the reviewer what you are most worried about."
+            />
+          </div>
+          <div className="field-pair">
+            <label htmlFor="review-limits">Review guardrails</label>
+            <textarea
+              id="review-limits"
+              value={fields.constraints || ""}
+              onChange={(event) => updateField("constraints", event.target.value)}
+              placeholder="What should the review avoid or prioritize?"
+            />
+          </div>
+        </div>
+        {renderAdvancedFields()}
+      </>
+    );
+  }
 
   return (
     <main className="shell">
@@ -291,165 +571,18 @@ export default function Home() {
             <div className="section-header">
               <div>
                 <p className="eyebrow">{modeLabels[mode]}</p>
-                <h2>Prompt inputs</h2>
+                <h2>{sectionTitles[mode]}</h2>
               </div>
-              <button className="secondary-button" type="button" onClick={() => setShowProviderPanel((open) => !open)}>
-                Provider
-              </button>
+              {mode === "build" ? (
+                <button className="secondary-button" type="button" onClick={() => setShowProviderPanel((open) => !open)}>
+                  Provider keys
+                </button>
+              ) : null}
             </div>
 
-            <div className="provider-strip">
-              <label htmlFor="provider">Model provider</label>
-              <select
-                id="provider"
-                value={provider}
-                disabled={buildProviderDisabled}
-                onChange={(event) => setProvider(event.target.value as Provider)}
-              >
-                <option value="company-openai">Company OpenAI</option>
-                <option value="anthropic">Claude / Anthropic</option>
-                <option value="gemini">Gemini</option>
-              </select>
-              {buildProviderDisabled ? <small>Personal providers are available on Screen 2 only.</small> : null}
-            </div>
-
-            {showProviderPanel ? (
-              <div className="provider-panel">
-                <p>
-                  Claude and Gemini keys are saved only in this browser. Do not use this option on shared computers.
-                </p>
-                <div className="field-pair">
-                  <label htmlFor="anthropic-key">Claude API key</label>
-                  <input
-                    id="anthropic-key"
-                    type="password"
-                    value={settings.anthropicKey}
-                    onChange={(event) => setSettings((current) => ({ ...current, anthropicKey: event.target.value }))}
-                    placeholder="sk-ant-..."
-                  />
-                </div>
-                <div className="field-pair">
-                  <label htmlFor="anthropic-model">Claude model</label>
-                  <input
-                    id="anthropic-model"
-                    value={settings.anthropicModel}
-                    onChange={(event) => setSettings((current) => ({ ...current, anthropicModel: event.target.value }))}
-                  />
-                </div>
-                <div className="field-pair">
-                  <label htmlFor="gemini-key">Gemini API key</label>
-                  <input
-                    id="gemini-key"
-                    type="password"
-                    value={settings.geminiKey}
-                    onChange={(event) => setSettings((current) => ({ ...current, geminiKey: event.target.value }))}
-                    placeholder="AIza..."
-                  />
-                </div>
-                <div className="field-pair">
-                  <label htmlFor="gemini-model">Gemini model</label>
-                  <input
-                    id="gemini-model"
-                    value={settings.geminiModel}
-                    onChange={(event) => setSettings((current) => ({ ...current, geminiModel: event.target.value }))}
-                  />
-                </div>
-              </div>
-            ) : null}
-
-            {mode === "build" ? (
-              <div className="artifact-panel">
-                <div className="field-pair">
-                  <label htmlFor="prd-document">PRD from Screen 1</label>
-                  <textarea
-                    id="prd-document"
-                    value={artifacts.prdDocument}
-                    onChange={(event) => updateArtifact("prdDocument", event.target.value)}
-                    placeholder="Generate Screen 1 first, or paste a PRD here."
-                  />
-                </div>
-              </div>
-            ) : null}
-
-            {mode === "review" ? (
-              <div className="artifact-panel">
-                <div className="field-pair">
-                  <label htmlFor="review-prd-document">Original PRD</label>
-                  <textarea
-                    id="review-prd-document"
-                    value={artifacts.prdDocument}
-                    onChange={(event) => updateArtifact("prdDocument", event.target.value)}
-                    placeholder="Generate Screen 1 first, or paste the PRD here."
-                  />
-                </div>
-                <div className="field-pair">
-                  <label htmlFor="review-build-prompt">Build prompt sent to Claude/Codex</label>
-                  <textarea
-                    id="review-build-prompt"
-                    value={artifacts.buildPrompt}
-                    onChange={(event) => updateArtifact("buildPrompt", event.target.value)}
-                    placeholder="Generate Screen 2 first, or paste the build prompt here."
-                  />
-                </div>
-                <div className="field-pair">
-                  <label htmlFor="implementation-report">Implementation Report from builder</label>
-                  <textarea
-                    id="implementation-report"
-                    value={artifacts.implementationReport}
-                    onChange={(event) => updateArtifact("implementationReport", event.target.value)}
-                    placeholder="Paste Claude/Codex final report, changed files, test output, screenshots notes, or manual QA notes."
-                    required
-                  />
-                </div>
-              </div>
-            ) : null}
-
-            <div className="field-pair">
-              <label htmlFor="role">Role</label>
-              <input id="role" value={fields.role} onChange={(event) => updateField("role", event.target.value)} required />
-            </div>
-            <div className="field-pair">
-              <label htmlFor="goal">What are you trying to do?</label>
-              <textarea
-                id="goal"
-                value={fields.goal}
-                onChange={(event) => updateField("goal", event.target.value)}
-                placeholder="Describe the task casually. It can be messy."
-                required
-              />
-            </div>
-            <div className="field-pair">
-              <label htmlFor="context">What do you already have?</label>
-              <textarea
-                id="context"
-                value={fields.context}
-                onChange={(event) => updateField("context", event.target.value)}
-                placeholder="Mention existing code, screenshots, app type, platform, data source, or current state."
-                required
-              />
-            </div>
-            <div className="field-pair">
-              <label htmlFor="constraints">What should the AI avoid changing?</label>
-              <textarea
-                id="constraints"
-                value={fields.constraints || ""}
-                onChange={(event) => updateField("constraints", event.target.value)}
-                placeholder="Scope limits, files to avoid, style rules, deadline, compliance needs."
-              />
-            </div>
-            <div className="field-pair">
-              <label htmlFor="output-format">What should the final answer include?</label>
-              <textarea id="output-format" value={fields.output} onChange={(event) => updateField("output", event.target.value)} required />
-            </div>
-            <div className="field-pair">
-              <label htmlFor="extra">Extra notes</label>
-              <textarea
-                id="extra"
-                value={fields.extraNotes || ""}
-                onChange={(event) => updateField("extraNotes", event.target.value)}
-                placeholder="Paste rough notes, error text, partial requirements, or team preferences."
-              />
-            </div>
+            {mode === "prd" ? renderPlanFields() : null}
+            {mode === "build" ? renderBuildFields() : null}
+            {mode === "review" ? renderReviewFields() : null}
 
             <div className="example-box">
               <strong>Helpful things to include</strong>
@@ -463,7 +596,7 @@ export default function Home() {
             <div className="section-header">
               <div>
                 <p className="eyebrow">Final artifact</p>
-                <h2>Generated prompt</h2>
+                <h2>{outputTitles[mode]}</h2>
               </div>
               <button className="secondary-button" type="button" onClick={copyPrompt} disabled={!output}>
                 {copied ? "Copied" : "Copy"}
@@ -471,7 +604,7 @@ export default function Home() {
             </div>
 
             <div className={`output-box ${output ? "" : "empty"}`}>
-              {isLoading ? "Writing a structured prompt..." : output || "Fill the fields, choose a mode, then generate."}
+              {isLoading ? loadingText[mode] : output || emptyOutputText[mode]}
             </div>
 
             {generatedMeta ? <p className="meta-line">{generatedMeta}</p> : null}

@@ -196,6 +196,10 @@ h2 {
   flex-wrap: wrap;
 }
 
+.fixed-provider {
+  justify-content: flex-start;
+}
+
 .provider-strip label {
   font-weight: 700;
 }
@@ -207,6 +211,10 @@ h2 {
 .provider-strip small {
   width: 100%;
   color: var(--muted);
+}
+
+.provider-strip strong {
+  color: var(--blue);
 }
 
 .provider-panel {
@@ -236,6 +244,59 @@ h2 {
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--panel);
+}
+
+.screen-card {
+  display: grid;
+  gap: 2px;
+  margin: 18px 0;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+}
+
+.plan-card {
+  border-left: 6px solid var(--accent);
+}
+
+.build-card {
+  border-left: 6px solid var(--blue);
+  background: #f7fafe;
+}
+
+.review-card {
+  border-left: 6px solid var(--warn);
+  background: #fffaf7;
+}
+
+.primary-evidence {
+  padding: 12px;
+  border: 1px solid #edcbbd;
+  border-radius: 8px;
+  background: var(--warn-soft);
+}
+
+.large-textarea {
+  min-height: 140px;
+}
+
+.advanced-panel {
+  margin: 12px 0 18px;
+  border: 1px dashed var(--border-strong);
+  border-radius: 8px;
+  background: var(--panel);
+  padding: 12px;
+}
+
+.advanced-panel summary {
+  color: var(--accent-strong);
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.advanced-panel .field-pair:first-of-type {
+  margin-top: 12px;
 }
 
 .field-pair {
